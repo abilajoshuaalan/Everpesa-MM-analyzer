@@ -1,0 +1,1178 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Everpesa · Mobile Money Risk Analyzer</title>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<style>
+  /* ============================================================================
+     DESIGN TOKENS
+     Single source of truth for colour, used by every component below. Changing a
+     token here re-themes the whole app. Naming: brand/navy = identity, page/card
+     = surfaces, ink/mut = text, hi/md/lo = risk severities, ok = pass state.
+     ============================================================================ */
+  :root{
+    --brand:#1B3AD6; --brand2:#3D63F0; --navy:#0B1A57; --brandbg:#EDF1FF;
+    --page:#F5F7FD; --card:#FFFFFF; --line:#E2E8F5; --ink:#0C1633; --mut:#5A6685;
+    --in:#1B3AD6; --out:#A9BCEC; --net:#0B1A57;
+    --hi:#DC2626; --hibg:#FDECEC; --md:#D97706; --mdbg:#FEF4E2; --lo:#64748B; --lobg:#F1F4FA;
+    --ok:#1F9D55; --okbg:#E8F6EE;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--page);color:var(--ink);-webkit-font-smoothing:antialiased}
+
+  /* ---- App chrome: top bar, window/wallet toggles ---- */
+  .top{background:linear-gradient(120deg,var(--navy),var(--brand) 55%,var(--brand2));color:#fff;padding:18px 26px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px}
+  .logo{display:flex;align-items:center;gap:12px}
+  .mark{width:34px;height:34px;border-radius:50%;background:#fff;position:relative;flex:none}
+  .mark:after{content:"";position:absolute;inset:9px;border-radius:50%;background:var(--brand)}
+  .mark:before{content:"";position:absolute;right:6px;top:14px;width:13px;height:6px;background:#fff;border-radius:3px;z-index:2}
+  .brandname{font-size:19px;font-weight:700;letter-spacing:-.3px}
+  .sub{font-size:11.5px;color:#cdd8ff;margin-top:1px}
+  .topctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .seg{display:flex;background:rgba(255,255,255,.13);border-radius:9px;padding:3px}
+  .seg button{background:none;border:none;color:#dfe6ff;font-size:12px;padding:6px 12px;border-radius:7px;cursor:pointer;font-weight:600}
+  .seg button.on{background:#fff;color:var(--brand)}
+  .wrap{max-width:1060px;margin:0 auto;padding:22px 18px 60px}
+
+  /* ---- Upload dropzone + parsed-file chips ---- */
+  .drop{background:var(--card);border:2px dashed var(--brand);border-radius:16px;padding:22px;text-align:center;cursor:pointer;transition:.15s;margin-bottom:16px}
+  .drop:hover,.drop.drag{background:var(--brandbg)}
+  .drop h3{font-size:15px;font-weight:700;color:var(--navy);margin-bottom:4px}
+  .drop p{font-size:12.5px;color:var(--mut)}
+  .drop .ic{width:42px;height:42px;border-radius:12px;background:var(--brandbg);display:inline-flex;align-items:center;justify-content:center;margin-bottom:9px;color:var(--brand);font-size:21px}
+  .files{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 10px 6px 12px;font-size:12px;display:flex;align-items:center;gap:8px;color:var(--navy)}
+  .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+  .chip .dot.err{background:var(--hi)}
+  .chip b{font-weight:600}
+  .chip .x{cursor:pointer;color:var(--mut);font-weight:700;border:none;background:none;font-size:14px;line-height:1}
+  .chip.clr{color:var(--hi);cursor:pointer;font-weight:600}
+
+  /* ---- Borrower selector + analysis/decision tabs ---- */
+  .bbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  .bcard{border:1px solid var(--line);background:var(--card);border-radius:12px;padding:9px 13px;cursor:pointer;min-width:150px;transition:.15s}
+  .bcard.on{border-color:var(--brand);background:var(--brandbg)}
+  .bcard .bn{font-size:13px;font-weight:700;color:var(--navy)}
+  .bcard .bp{font-size:11px;color:var(--mut);margin-top:1px}
+  .tabs{display:flex;gap:4px;background:#E7ECF8;border-radius:11px;padding:4px;margin-bottom:16px;width:fit-content}
+  .tabs button{border:none;background:none;font-size:13px;font-weight:700;color:var(--mut);padding:8px 18px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:7px}
+  .tabs button.on{background:#fff;color:var(--brand);box-shadow:0 1px 3px rgba(11,26,87,.08)}
+  .empty{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:46px 20px;text-align:center;color:var(--mut)}
+  .empty .ic{font-size:34px;color:var(--brand);opacity:.5}
+
+  /* ---- Cards, KPI tiles, layout grids ---- */
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+  @media(max-width:760px){.grid4{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .kpi .lab{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--mut)}
+  .kpi .val{font-size:23px;font-weight:700;margin-top:6px;letter-spacing:-.5px}
+  .kpi .sub{font-size:11px;color:var(--mut);margin-top:3px}
+  .ttl{font-size:14px;font-weight:700;color:var(--navy);margin-bottom:3px;display:flex;align-items:center;gap:7px}
+  .cap{font-size:11.5px;color:var(--mut);margin-bottom:14px}
+
+  /* ---- Headline credit-tier banner + tier ladder ---- */
+  .headline{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center;background:linear-gradient(120deg,var(--navy),var(--brand));border-radius:16px;padding:20px 22px;color:#fff;margin-bottom:16px}
+  .evbadge{background:#fff;border-radius:14px;padding:14px 20px;text-align:center;min-width:110px}
+  .evbadge .lt{font-size:42px;font-weight:800;color:var(--brand);line-height:1}
+  .evbadge .rs{font-size:11px;font-weight:700;color:var(--navy);margin-top:3px}
+  .evbadge .pf{font-size:10px;color:var(--mut);margin-top:2px}
+  .hl-txt .hl-k{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#bcc8ff;font-weight:700}
+  .hl-txt h2{font-size:18px;font-weight:700;margin:2px 0 6px}
+  .hl-txt p{font-size:12.5px;color:#dde4ff;line-height:1.55}
+  .ladder{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+  .lstep{background:rgba(255,255,255,.12);border-radius:8px;padding:6px 9px;font-size:11px;color:#cdd8ff}
+  .lstep.act{background:#fff;color:var(--brand);font-weight:700}
+  .lstep b{font-weight:700}
+  .secondary{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--mut);flex-wrap:wrap}
+  .stier{font-weight:800;padding:3px 10px;border-radius:7px}
+
+  /* ---- Monthly inflow/outflow bar chart ---- */
+  .bars{display:flex;align-items:flex-end;gap:14px;height:180px;padding-top:8px}
+  .mcol{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%}
+  .mstack{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;gap:5px}
+  .b{width:26%;border-radius:5px 5px 0 0;min-height:2px}
+  .mlab{font-size:11px;color:var(--mut);font-weight:600}
+  .legend{display:flex;gap:16px;margin-top:12px;font-size:11.5px;color:var(--mut)}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px}
+
+  /* ---- Inflow-concentration bars ---- */
+  .concrow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .cname{width:38%;font-size:12px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ctrack{flex:1;background:#EEF2FB;border-radius:6px;height:20px;overflow:hidden}
+  .cfill{height:100%;border-radius:6px;display:flex;align-items:center;justify-content:flex-end;padding-right:7px}
+  .cfill span{font-size:10px;color:#fff;font-weight:700}
+  .cval{width:64px;text-align:right;font-size:12px;font-weight:600}
+
+  /* ---- Five-layer verification list + AML alerts ---- */
+  .layer{display:flex;align-items:flex-start;gap:11px;padding:9px;border-radius:10px;background:var(--page);margin-bottom:7px}
+  .lnum{width:26px;height:26px;border-radius:50%;background:#fff;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--brand);flex:none}
+  .lhead{display:flex;align-items:center;gap:8px}
+  .lhead b{font-size:13px}
+  .pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px}
+  .lnote{font-size:11px;color:var(--mut);margin-top:2px;line-height:1.5}
+  .alert{display:flex;gap:11px;padding:12px;border-radius:11px;margin-bottom:9px;border:1px solid}
+  .alert .ah{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+  .sev{font-size:10px;font-weight:800;color:#fff;padding:2px 8px;border-radius:6px}
+  .alert b{font-size:13px}
+  .alert p{font-size:11.5px;color:var(--mut);line-height:1.55}
+  ul.cl{margin:6px 0 0 18px}
+  ul.cl li{font-size:11.5px;color:var(--mut);margin-bottom:6px;line-height:1.5}
+  .foot{text-align:center;font-size:11px;color:#9aa3bd;margin-top:8px}
+
+  /* ---- Action buttons, loading + warning banners ---- */
+  .act{display:flex;gap:9px;margin-bottom:16px;flex-wrap:wrap}
+  .btn{border:1px solid var(--line);background:#fff;color:var(--navy);font-size:12.5px;font-weight:600;padding:9px 15px;border-radius:9px;cursor:pointer;display:flex;align-items:center;gap:7px}
+  .btn:hover{background:var(--brandbg);border-color:var(--brand)}
+  .btn.pri{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .btn.pri:hover{background:var(--brand2)}
+  .loading{display:none;align-items:center;gap:10px;background:var(--brandbg);border:1px solid #C9D6FB;border-radius:11px;padding:11px 15px;font-size:12.5px;color:var(--brand);font-weight:600;margin-bottom:16px}
+  .spin{width:15px;height:15px;border:2px solid #C9D6FB;border-top-color:var(--brand);border-radius:50%;animation:s .7s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .banner{background:var(--hibg);border:1px solid #F3C7C7;border-radius:12px;padding:11px 14px;display:flex;gap:9px;font-size:11.5px;color:#9b2222;line-height:1.5;margin-bottom:16px}
+
+  /* ---- Decisioning tab: pipeline, scorecard, verdict, pricing, affordability ---- */
+  .pipe{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+  .pnode{flex:1;min-width:120px;text-align:center;padding:12px 8px;position:relative}
+  .pnode .pk{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--mut);font-weight:700}
+  .pnode .pv{font-size:18px;font-weight:800;margin-top:5px;color:var(--navy)}
+  .pnode .pd{font-size:10.5px;color:var(--mut);margin-top:2px}
+  .pnode:not(:last-child):after{content:"→";position:absolute;right:-8px;top:50%;transform:translateY(-50%);color:#B9C4E2;font-size:16px;z-index:2}
+  .sctable{width:100%;border-collapse:collapse}
+  .sctable td{padding:9px 6px;border-bottom:1px solid var(--line);font-size:12px;vertical-align:middle}
+  .sctable .rl{font-weight:600;color:var(--ink)}
+  .sctable .th{color:var(--mut);font-size:11px}
+  .sctable .vl{font-weight:700;text-align:right}
+  .res{font-size:10px;font-weight:800;padding:3px 9px;border-radius:6px;display:inline-block}
+  .res.p{color:var(--ok);background:var(--okbg)}
+  .res.f{color:var(--hi);background:var(--hibg)}
+  .verdict{text-align:center;padding:20px}
+  .vbadge{font-size:30px;font-weight:800;padding:10px 26px;border-radius:12px;display:inline-block}
+  .vnote{font-size:12.5px;color:var(--mut);margin-top:12px;line-height:1.55}
+  .gates{text-align:left;margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+  .gates .g{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:6px;color:var(--ink)}
+  .gates .gi{width:16px;height:16px;border-radius:50%;background:var(--mdbg);color:var(--md);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex:none}
+  .rate-bar{display:flex;height:34px;border-radius:9px;overflow:hidden;margin:6px 0 14px;border:1px solid var(--line)}
+  .rate-seg{display:flex;align-items:center;justify-content:center;color:#fff;font-size:11.5px;font-weight:700}
+  .rtab{width:100%;border-collapse:collapse}
+  .rtab td{padding:7px 6px;border-bottom:1px solid var(--line);font-size:12.5px}
+  .rtab .rl{color:var(--mut)}
+  .rtab .rv{text-align:right;font-weight:700}
+  .rtab tr.tot td{border-top:2px solid var(--brand);border-bottom:none;font-size:14px;color:var(--brand);font-weight:800;padding-top:10px}
+  .agrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
+  @media(max-width:760px){.agrid{grid-template-columns:1fr 1fr}.pnode:not(:last-child):after{display:none}}
+  .amini{background:var(--page);border-radius:10px;padding:11px}
+  .amini .l{font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;color:var(--mut);font-weight:700}
+  .amini .v{font-size:17px;font-weight:800;color:var(--navy);margin-top:4px}
+  .averd{border-radius:10px;padding:12px 14px;font-size:12.5px;line-height:1.55}
+
+  /* ---- Print/PDF report (hidden on screen, shown only when printing) ---- */
+  #printreport{display:none}
+  @media print{.app{display:none!important}#printreport{display:block!important}body{background:#fff}@page{margin:14mm}}
+  #printreport .rp{font-family:Georgia,'Times New Roman',serif;color:#0C1633;max-width:720px}
+  #printreport .rphead{border-bottom:3px solid #1B3AD6;padding-bottom:10px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-end}
+  #printreport h1{font-size:22px;color:#0B1A57}
+  #printreport .rpmeta{font-size:11px;color:#5A6685;text-align:right}
+  #printreport h3{font-size:13px;color:#1B3AD6;margin:16px 0 6px;border-bottom:1px solid #E2E8F5;padding-bottom:3px;letter-spacing:.3px}
+  #printreport table{width:100%;border-collapse:collapse;font-size:12px}
+  #printreport td{padding:4px 6px;border-bottom:1px solid #eef}
+  #printreport .lbl{color:#5A6685;width:55%}
+  #printreport .vv{text-align:right;font-weight:700}
+  #printreport .rtier{display:inline-block;border:2px solid #1B3AD6;color:#1B3AD6;font-weight:800;font-size:26px;padding:4px 16px;border-radius:8px;margin-right:12px}
+  #printreport ul{margin:4px 0 0 18px;font-size:12px}
+  #printreport li{margin-bottom:4px}
+  #printreport .sig{margin-top:30px;display:flex;gap:40px;font-size:11px;color:#5A6685}
+  #printreport .sigline{border-top:1px solid #0C1633;padding-top:4px;width:200px}
+  #printreport .disc{margin-top:18px;font-size:10px;color:#8a93ad;border-top:1px solid #E2E8F5;padding-top:8px}
+  #printreport .amlrow{font-size:11.5px;margin-bottom:5px}
+  #printreport .amlrow b{color:#0B1A57}
+</style>
+
+<!-- =============================================================================
+     VIEW SHELL (static markup)
+     Everything dynamic is rendered by the View layer into the labelled mount
+     points below. The Controller wires events to these elements on boot.
+       #drop / #file ...... upload dropzone + hidden file input
+       #loading ........... async-parse progress indicator
+       #files ............. parsed-file chips
+       #bbar .............. borrower selector (multi-statement)
+       #tabhost ........... Analysis / Decisioning tab strip
+       #results ........... active tab body
+       #printreport ....... print-only credit memo
+     ============================================================================ -->
+<div class="app">
+<div class="top">
+  <div class="logo"><div class="mark"></div><div><div class="brandname">everpesa</div><div class="sub">Mobile Money Risk Analyzer · 5-layer verification</div></div></div>
+  <div class="topctl">
+    <div class="seg" id="winseg"><button data-w="90" class="on">90-day window</button><button data-w="all">All data</button></div>
+    <div class="seg" id="walletseg"></div>
+  </div>
+</div>
+<div class="wrap">
+  <div class="drop" id="drop">
+    <div class="ic">↑</div>
+    <h3>Upload mobile money statements</h3>
+    <p>Drag &amp; drop or click — MTN MoMo &amp; Airtel Money PDFs. Borrowers auto-detected by phone number; analysis updates live.</p>
+    <input type="file" id="file" accept="application/pdf,.pdf" multiple hidden>
+  </div>
+  <div class="loading" id="loading"><div class="spin"></div><span id="loadtxt">Reading statement…</span></div>
+  <div class="files" id="files"></div>
+  <div class="bbar" id="bbar"></div>
+  <div id="tabhost"></div>
+  <div id="results"></div>
+</div>
+</div>
+<div id="printreport"></div>
+
+<!-- Third-party: Mozilla pdf.js, used only to pull the raw text layer out of an
+     uploaded statement. All parsing/analysis below is our own and runs locally. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+"use strict";
+/* =============================================================================
+ * EVERPESA — MOBILE MONEY RISK ANALYZER
+ * -----------------------------------------------------------------------------
+ * A fully client-side underwriting tool. A loan officer drops MTN MoMo / Airtel
+ * Money statement PDFs in; the app reads the cashflow, scores it against a fixed
+ * underwriting policy, assigns a credit tier, prices a loan, and produces an
+ * exportable decision memo. No data ever leaves the browser.
+ *
+ * ARCHITECTURE — single-file MVC. Read top-to-bottom; dependencies point upward.
+ *
+ *   CONFIG ........ Underwriting policy + product economics. The one place to
+ *                   tune thresholds, fees and tier definitions.
+ *   Util .......... Pure formatting helpers + a file-download shim.
+ *
+ *   ── MODEL (data + business logic; no DOM) ──────────────────────────────────
+ *   Store ......... Single source of truth for app state, plus memoized derived
+ *                   views (flattened transactions, borrowers). A version counter
+ *                   invalidates the caches whenever the underlying files change.
+ *   Pdf ........... Extracts the text layer from a PDF (pages fetched in parallel).
+ *   Parser ........ Detects the wallet and maps statement text -> transactions.
+ *   Analysis ...... Turns a borrower's transactions into a cashflow profile.
+ *                   Memoized on (files-version, window, wallet, borrower).
+ *   Decision ...... Credit tier, risk-based pricing, and the lend verdict.
+ *
+ *   ── VIEW (pure render functions; build HTML strings, touch the DOM) ─────────
+ *   View .......... Renders chrome (file chips, borrower bar, wallet tabs), the
+ *                   Analysis tab, the Decisioning tab, and the export artifacts.
+ *
+ *   ── CONTROLLER (orchestration; the only layer that owns the update loop) ────
+ *   Controller .... Ingest pipeline, user-event handlers, and render(): the
+ *                   function that pulls Model state through the View on change.
+ *
+ * DATA FLOW
+ *   upload -> Pdf.extract -> Parser.parseAny -> Store(files) -> Analysis.run
+ *          -> Decision.evaluate -> View.render -> (export: PDF / JSON / CSV)
+ *
+ * NOTE ON HEURISTICS: some statement-shape regexes below are tuned to sample
+ * statements (e.g. the account holder's name is used to classify transfer
+ * direction). Treat the Parser as format-specific and re-validate it against new
+ * statement layouts before relying on a decision. See Parser section.
+ * ========================================================================== */
+
+/* pdf.js is loaded as a classic script that publishes a global. Capture it and
+ * point its web-worker at the matching CDN build. PDFJS may be null if the CDN
+ * is unreachable — the Controller surfaces that to the user on boot. */
+const PDFJS = window['pdfjsLib'];
+if (PDFJS) PDFJS.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+/* One real day in milliseconds. Used for window math and span calculations. */
+const DAY_MS = 864e5;
+
+/* =============================================================================
+ * CONFIG — underwriting policy & product economics
+ * -----------------------------------------------------------------------------
+ * Everything a credit officer might want to tune lives here. The footers in the
+ * UI advertise these as "configurable underwriting policy"; this object is what
+ * they refer to. Values are deliberately plain so they read like a policy sheet.
+ * ========================================================================== */
+const CONFIG = {
+  // Short month labels for the monthly cashflow chart (index 0 = January).
+  months: ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],
+
+  // Product economics. All percentages are per 14-day repayment cycle.
+  pricing: {
+    investorNet: 7.6,                       // fixed return paid through to the investor
+    commission: 0.5,                        // investor-side investment commission
+    cycleDays: 14,                          // length of one repayment cycle
+    serviceFee: { A: 2.4, B: 2.9, C: 3.4, D: 2.6 },  // Everpesa fee, rises with risk tier
+  },
+
+  // Credit ladder: tier code -> profile label + capital reserve. Order matters
+  // (index 2 = "C / New direct", index 4 = "E / Watch-list"); Decision.tier
+  // selects by index.
+  ladder: [
+    { c: "A", p: "Prime repeat (≥3 on-time)", r: "1.5%" },
+    { c: "B", p: "Standard repeat",           r: "2.5%" },
+    { c: "C", p: "New direct",                r: "4.0%" },
+    { c: "D", p: "SACCO-vouched",             r: "2.0%" },
+    { c: "E", p: "Watch-list / hold",         r: "review" },
+  ],
+
+  // Risk thresholds. These drive both the scorecard and the structural-risk
+  // flags that set the tier and verdict.
+  policy: {
+    concentrationMaxPct: 40,      // single-funder inflow share that trips a risk flag
+    concentrationAlertPct: 25,    // lower bar that raises an AML concentration alert
+    passThroughDays: 3,           // same-day in->out cycles that trip a risk flag
+    lrFloor: 0.8,                 // liquidity-ratio floor (below = structural risk)
+    lrPass: 1.0,                  // liquidity-ratio scorecard pass line
+    lrStrong: 1.2,                // liquidity-ratio "Low risk" cross-check band
+    throughputMinMonthly: 200000, // min avg monthly inflow to pass throughput rule
+    minTxnsPerWeek: 1,            // min activity to pass the account-activity rule
+    coverageTarget: 0.5,          // max (cycle cost / retained per cycle) to be "serviceable"
+    daysPerMonth: 30.44,          // average month length, for monthly averaging
+    thinTxnThreshold: 20,         // below this many txns the cashflow layer reads "thin"
+  },
+
+  // Recommended-ticket sizing. Ticket is throughput-based, discounted for
+  // pass-through behaviour, then capped against retained net.
+  ticket: {
+    inflowShare: 0.30,            // lend against 30% of average monthly inflow
+    netMultiple: 1.5,             // hard cap at 1.5x retained monthly net
+    rounding: 50000,             // round tickets to the nearest UGX 50k
+    passThroughDiscount: { heavy: 0.4, some: 0.7, none: 1 },  // by pass-through intensity
+  },
+
+  // Parser/analysis sanity bounds.
+  parser: {
+    maxTxnAmount: 5e7,            // ignore single MTN amounts above this (likely mis-parse)
+    repeatedAmountFloor: 5e4,     // only track repeated amounts at/above this size
+    passThroughFloor: 2e5,        // min inflow size for a day to count as pass-through
+    passThroughOutRatio: 0.6,     // outflow must be >= 60% of inflow to count as pass-through
+  },
+};
+
+/* =============================================================================
+ * Util — pure presentation helpers
+ * ========================================================================== */
+const Util = {
+  /** Format a UGX amount with thousands separators, e.g. 1234567 -> "UGX 1,234,567". */
+  fmt: n => "UGX " + Math.round(n).toLocaleString(),
+
+  /** Compact money for tight chart labels: >=1M -> "1.23M", else "750K". */
+  fmtK: n => Math.abs(n) >= 1e6 ? (n / 1e6).toFixed(2) + "M" : Math.round(n / 1000) + "K",
+
+  /** Trigger a client-side file download of in-memory text content. */
+  download(content, name, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+  },
+};
+
+/* =============================================================================
+ * MODEL · Store — application state + memoized derived views
+ * -----------------------------------------------------------------------------
+ * The single source of truth. `state` holds raw inputs and UI selections; `ver`
+ * is bumped on every mutation of `files`. Derived views (flattened transactions,
+ * per-borrower grouping) cache their result against `ver`, so the many renders
+ * triggered by tab/wallet/borrower toggles reuse work instead of recomputing.
+ * ========================================================================== */
+const Store = (() => {
+  const state = {
+    files: [],          // [{name,size,wallet,phone,holder,count,ok,tx:[...]}]
+    win: "90",          // active window: "90" (rolling 90 days) | "all"
+    wallet: "ALL",      // wallet filter: "ALL" | "MTN" | "Airtel"
+    borrower: "ALL",    // borrower filter: "ALL" | <msisdn>
+    tab: "analysis",    // active tab: "analysis" | "decision"
+    ver: 0,             // cache-invalidation counter; bump() on any files change
+  };
+
+  let txCache = null, txVer = -1;   // memo: flattened transactions across all files
+  let bCache = null, bVer = -1;     // memo: borrowers grouped by phone number
+
+  /** Invalidate derived caches. Call after any mutation of state.files. */
+  function bump() { state.ver++; }
+
+  /** All transactions across all uploaded files, flattened once per version. */
+  function getTx() {
+    if (txVer !== state.ver) {
+      txCache = state.files.flatMap(f => f.tx || []);
+      txVer = state.ver;
+    }
+    return txCache;
+  }
+
+  /** Distinct borrowers (keyed by MSISDN) with their wallets and transactions. */
+  function getBorrowers() {
+    if (bVer === state.ver) return bCache;
+    const map = Object.create(null);
+    for (const t of getTx()) {
+      let b = map[t.phone];
+      if (!b) b = map[t.phone] = { phone: t.phone, holder: t.holder, raw: t.rawPhone, wallets: new Set(), tx: [] };
+      b.wallets.add(t.wallet);
+      b.tx.push(t);
+    }
+    bCache = Object.values(map).map(b => ({ ...b, wallets: [...b.wallets] }));
+    bVer = state.ver;
+    return bCache;
+  }
+
+  return { state, bump, getTx, getBorrowers };
+})();
+
+/* =============================================================================
+ * MODEL · Pdf — text extraction
+ * ========================================================================== */
+const Pdf = {
+  /**
+   * Read a PDF File and return its concatenated text layer.
+   * Pages are fetched concurrently (Promise.all) then joined in order, which is
+   * markedly faster than awaiting page-by-page for multi-page statements.
+   * @param {File} file
+   * @returns {Promise<string>}
+   */
+  async extract(file) {
+    const buf = await file.arrayBuffer();
+    const pdf = await PDFJS.getDocument({ data: new Uint8Array(buf) }).promise;
+    const pages = await Promise.all(
+      Array.from({ length: pdf.numPages }, (_, i) =>
+        pdf.getPage(i + 1).then(p => p.getTextContent()).then(c => c.items.map(x => x.str).join(" ")))
+    );
+    return pages.join("\n") + "\n";
+  },
+};
+
+/* =============================================================================
+ * MODEL · Parser — statement text -> normalized transactions
+ * -----------------------------------------------------------------------------
+ * Each parser is tuned to one wallet's statement layout. A normalized
+ * transaction is:
+ *   { date:"YYYY-MM-DD", dir:"i"|"o", amount, fee, cp, type, wallet }
+ * where dir "i" = money in (credit), "o" = money out (debit), cp = counterparty.
+ *
+ * CAVEAT: direction/counterparty heuristics lean on statement-specific cues
+ * (including the sample account holder's name "ALAN JOSHUA"). Revisit these
+ * regexes before trusting output on a statement layout you haven't seen.
+ * ========================================================================== */
+const Parser = (() => {
+
+  /** Sniff the wallet from document markers. Falls back to "auto" (try both). */
+  function detect(t) {
+    if (/AIRTEL MONEY STATEMENT/i.test(t) || /airtel\.co\.ug/i.test(t)) return "airtel";
+    if (/Taxes\(UGX\)/i.test(t) || /ALAN JOSHUA/i.test(t) || (/UGX/.test(t) && /Transaction ID/i.test(t))) return "mtn";
+    return "auto";
+  }
+
+  /** Reduce a phone string to its 9-digit national MSISDN (drops country code). */
+  function normPhone(p) {
+    p = (p || "").replace(/\D/g, "");
+    if (p.length > 9) p = p.slice(-9);
+    return p;
+  }
+
+  /** Tidy a free-text counterparty/name: collapse spaces, Title Case, clamp length. */
+  function clean(s) {
+    return s.replace(/\s+/g, " ").replace(/[.,]+$/, "").trim().replace(/\b\w/g, c => c.toUpperCase()).slice(0, 34);
+  }
+
+  /** Pull {phone,name} from an MTN statement header. */
+  function metaMTN(t) {
+    let phone = "";
+    const p = t.match(/Mobile Number\s*(\d{9,15})/i);
+    if (p) phone = p[1];
+    let name = "";
+    const n = t.match(/Account Name\s*([A-Za-z][A-Za-z ]{2,40}?)\s*Mobile Number/i);
+    if (n && n[1].trim()) name = clean(n[1]);
+    else if (/ALAN JOSHUA ABILA/i.test(t)) name = "Alan Joshua Abila";
+    return { phone, name };
+  }
+
+  /** Pull {phone,name} from an Airtel statement header. */
+  function metaAirtel(t) {
+    let phone = "";
+    const p = t.match(/Mobile Number:?\s*(\d{9,15})/i);
+    if (p) phone = p[1];
+    let name = "";
+    const n = t.match(/Customer Name:?\s*([A-Za-z][A-Za-z ]{2,40}?)(?:\s*Mobile|\s*Email|\n)/i);
+    if (n) name = clean(n[1]);
+    return { phone, name };
+  }
+
+  /**
+   * Parse an MTN MoMo statement.
+   * Strategy: anchor on each "DD-MM-YYYY HH:MM:SS" timestamp and treat the text
+   * up to the next timestamp as one transaction body. Within a body the first
+   * "UGX <n>" is the amount and the second (if any) is the fee; transaction type
+   * and counterparty are classified from descriptive keywords.
+   */
+  function parseMTN(text) {
+    const re = /(\d{2})-(\d{2})-(\d{4})\s+(\d{2}:\d{2}:\d{2})([\s\S]*?)(?=\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2}|$)/g;
+    const out = [];
+    let m;
+    while ((m = re.exec(text))) {
+      const [, dd, mm, yy, , body] = m;
+
+      // First "UGX n" = amount, second = fee. Skip rows with no amount or an
+      // implausibly large one (guards against table mis-alignment).
+      const amts = [...body.matchAll(/UGX\s*([\d,]+)/g)].map(x => +x[1].replace(/,/g, ""));
+      if (!amts.length) continue;
+      const amount = amts[0], fee = amts.length >= 2 ? amts[1] : 0;
+      if (!amount || amount > CONFIG.parser.maxTxnAmount) continue;
+
+      // Direction: cash received, or a transfer addressed to the account holder.
+      const inflow = /Cash from/i.test(body) || /Transfer to\s+ALAN\s+JOSHUA/i.test(body);
+
+      // Classify type + extract the counterparty for each shape.
+      let cp = "Unknown", type = "Payment";
+      if (/Payment/i.test(body)) {
+        type = "Payment";
+        const c = body.match(/Payment (?:for|to)\s+([A-Za-z0-9 .&()']+?)\s+\d{8,}/i);
+        if (c) cp = clean(c[1]);
+      } else if (/Cash Out|Cash to/i.test(body)) {
+        type = "Cash Out";
+        const c = body.match(/Cash to\s+([A-Za-z0-9 .&()']+?)\s+\d{8,}/i);
+        if (c) cp = clean(c[1]);
+      } else if (inflow) {
+        type = /Cash from/i.test(body) ? "Cash In" : "Transfer In";
+        const c = body.match(/\d{8,}\s+([A-Za-z][A-Za-z .&()'\d]+?)\s+ALAN\s+JOSHUA/i);
+        if (c) cp = clean(c[1]);
+      } else if (/Transfer/i.test(body)) {
+        type = "Transfer";
+        const c = body.match(/Transfer to\s+([A-Za-z0-9 .&()']+?)\s+\d{8,}/i);
+        if (c) cp = clean(c[1]);
+      }
+
+      out.push({ date: `${yy}-${mm}-${dd}`, dir: inflow ? "i" : "o", amount, fee, cp: cp || "Unknown", type, wallet: "MTN" });
+    }
+    return out;
+  }
+
+  /**
+   * Parse an Airtel Money statement.
+   * Each row is a single regex match capturing date, description, amount,
+   * Credit/Debit flag and fee. Two-digit years are expanded to 20YY.
+   */
+  function parseAirtel(text) {
+    const re = /(\d{2})-(\d{2})-(\d{2})\s+\d{2}:\d{2}\s+[AP]M\s+([\s\S]*?)(?:Transaction\s+Successful|Successful)\s+([\d,]+\.\d{2})\s+(Credit|Debit)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/gi;
+    const out = [];
+    let m;
+    while ((m = re.exec(text))) {
+      const [, dd, mm, yy, desc, amt, cd, fee] = m;
+      const amount = +amt.replace(/,/g, "");
+      if (!amount) continue;
+
+      // Counterparty: prefer a name after "from/to", else a numeric id, else
+      // override with a few well-known Airtel system payees.
+      let cp = "Unknown";
+      const c = desc.match(/(?:from|to)\s+\d*\s*,?\s*([A-Za-z][A-Za-z .&']{2,})/i);
+      if (c) cp = clean(c[1]);
+      else { const c2 = desc.match(/(?:from|to)\s+(\d{6,})/i); if (c2) cp = "ID " + c2[1]; }
+      if (/AIRTEL MONEY/i.test(desc)) cp = "Airtel Money";
+      if (/Global Pay/i.test(desc)) cp = "AM Global Pay";
+      if (/MC PREPAID/i.test(desc)) cp = "MC Prepaid";
+
+      out.push({ date: `20${yy}-${mm}-${dd}`, dir: cd.toLowerCase() === "credit" ? "i" : "o", amount, fee: +fee.replace(/,/g, ""), cp, type: cd.toLowerCase() === "credit" ? "Received" : "Sent", wallet: "Airtel" });
+    }
+    return out;
+  }
+
+  /**
+   * Dispatch to the right parser. When detection is ambiguous, run both and keep
+   * whichever extracted more rows (the better-fitting layout).
+   * @returns {{wallet:string, tx:object[], meta:{phone:string,name:string}}}
+   */
+  function parseAny(text) {
+    const d = detect(text);
+    let wallet, tx, meta;
+    if (d === "airtel") { wallet = "Airtel"; tx = parseAirtel(text); meta = metaAirtel(text); }
+    else if (d === "mtn") { wallet = "MTN"; tx = parseMTN(text); meta = metaMTN(text); }
+    else {
+      const a = parseAirtel(text), mt = parseMTN(text);
+      if (mt.length >= a.length) { wallet = "MTN"; tx = mt; meta = metaMTN(text); }
+      else { wallet = "Airtel"; tx = a; meta = metaAirtel(text); }
+    }
+    return { wallet, tx, meta };
+  }
+
+  return { detect, normPhone, clean, metaMTN, metaAirtel, parseMTN, parseAirtel, parseAny };
+})();
+
+/* =============================================================================
+ * MODEL · Analysis — transactions -> cashflow profile
+ * -----------------------------------------------------------------------------
+ * run() is the analytical hot path. It is memoized on (files-version, window,
+ * wallet, borrower) so toggling tabs or filters that don't change those inputs
+ * returns instantly. Internally it makes a single pass over the windowed
+ * transactions to build every aggregate the dashboard needs.
+ *
+ * Return shapes:
+ *   null            -> no statements uploaded at all
+ *   { empty:true }  -> filters select an empty set
+ *   { ...profile }  -> full cashflow profile (flows, monthly series, top funders,
+ *                      pass-through days, repeated amounts, velocity, ...)
+ * ========================================================================== */
+const Analysis = (() => {
+  let cache, key = null;
+
+  function run() {
+    const s = Store.state;
+
+    // Memo key: anything that changes the result. `ver` covers the file set.
+    const k = s.ver + "|" + s.win + "|" + s.wallet + "|" + s.borrower;
+    if (k === key) return cache;
+    key = k;
+
+    let tx = Store.getTx();
+    if (!tx.length) return cache = null;
+
+    // 1) Scope to the selected borrower (before computing the window).
+    if (s.borrower !== "ALL") tx = tx.filter(t => t.phone === s.borrower);
+    if (!tx.length) return cache = { empty: true };
+
+    // 2) Window bounds from the borrower-scoped set. The 90-day window is
+    //    relative to the borrower's latest transaction, not "today", so old
+    //    sample statements still analyse sensibly. (t.ts is precomputed at
+    //    ingest, so this loop never parses date strings.)
+    let maxTs = -Infinity, minTs = Infinity;
+    for (let i = 0; i < tx.length; i++) { const ts = tx[i].ts; if (ts > maxTs) maxTs = ts; if (ts < minTs) minTs = ts; }
+    const winStart = s.win === "90" ? maxTs - 90 * DAY_MS : minTs;
+
+    // 3) Apply the window, then the wallet filter.
+    tx = tx.filter(t => t.ts >= winStart);
+    if (s.wallet !== "ALL") tx = tx.filter(t => t.wallet === s.wallet);
+    if (!tx.length) return cache = { empty: true };
+
+    // 4) Single pass builds every aggregate at once:
+    //    bm = monthly in/out, ci = inflow by counterparty, bd = per-day in/out
+    //    (+ largest single inflow), ac = counts of repeated large amounts.
+    const F = CONFIG.parser;
+    let inflow = 0, outflow = 0, fees = 0, inCount = 0, outCount = 0;
+    const bm = Object.create(null), ci = Object.create(null), bd = Object.create(null), ac = Object.create(null);
+    const holdersSet = new Set(), walletsSet = new Set();
+    for (let i = 0; i < tx.length; i++) {
+      const t = tx[i], amt = t.amount;
+      fees += t.fee;
+      holdersSet.add(t.holder);
+      walletsSet.add(t.wallet);
+      const mk = t.date.slice(0, 7);                                  // "YYYY-MM"
+      let mo = bm[mk]; if (!mo) mo = bm[mk] = { i: 0, o: 0 };
+      let dd = bd[t.date]; if (!dd) dd = bd[t.date] = { i: 0, o: 0, mx: 0 };
+      if (t.dir === "i") {
+        inflow += amt; inCount++;
+        mo.i += amt;
+        dd.i += amt; if (amt > dd.mx) dd.mx = amt;
+        ci[t.cp] = (ci[t.cp] || 0) + amt;
+      } else {
+        outflow += amt; outCount++;
+        mo.o += amt;
+        dd.o += amt;
+      }
+      if (amt >= F.repeatedAmountFloor) ac[amt] = (ac[amt] || 0) + 1;
+    }
+
+    const net = inflow - outflow;
+    const lr = outflow ? inflow / outflow : 0;                        // liquidity ratio
+
+    // Monthly series, chronologically ordered.
+    const monthly = Object.keys(bm).sort().map(kk => {
+      const mo = +kk.slice(5) - 1;
+      return { month: CONFIG.months[mo], inflow: bm[kk].i, outflow: bm[kk].o, net: bm[kk].i - bm[kk].o };
+    });
+
+    // Top funders by inflow share (concentration risk).
+    const topIn = Object.keys(ci).map(cp => ({ cp, v: ci[cp], pct: inflow ? ci[cp] / inflow * 100 : 0 }))
+      .sort((a, b) => b.v - a.v).slice(0, 6);
+    const topFunder = topIn[0] || { cp: "—", v: 0, pct: 0 };
+
+    // Pass-through days: a large inflow mostly pushed straight back out the same
+    // day — a float/agent or layering signal.
+    let ptDays = 0, ptVol = 0;
+    for (const dk in bd) {
+      const d = bd[dk];
+      if (d.mx >= F.passThroughFloor && d.i >= F.passThroughFloor && d.o >= F.passThroughOutRatio * d.i) { ptDays++; ptVol += d.o; }
+    }
+
+    // Repeated identical large amounts (structuring signal), most frequent first.
+    const repeated = Object.keys(ac).filter(a => ac[a] >= 3).map(a => [a, ac[a]]).sort((a, b) => b[1] - a[1]);
+
+    const spanDays = Math.max(1, Math.round((maxTs - winStart) / DAY_MS));
+
+    return cache = {
+      tx, inflow, outflow, net, fees, lr, monthly, topIn, topFunder, ptDays, ptVol, repeated,
+      inCount, outCount, count: tx.length,
+      perWeek: tx.length / (spanDays / 7), spanDays,
+      winStart: new Date(winStart).toISOString().slice(0, 10),
+      winEnd: new Date(maxTs).toISOString().slice(0, 10),
+      wallets: [...walletsSet], holders: [...holdersSet],
+    };
+  }
+
+  return { run };
+})();
+
+/* =============================================================================
+ * MODEL · Decision — tiering, pricing, and the lend verdict
+ * ========================================================================== */
+const Decision = (() => {
+  const P = CONFIG.policy, PR = CONFIG.pricing, T = CONFIG.ticket;
+
+  /**
+   * Assign an Everpesa credit tier from the count of structural risk flags
+   * (concentration, pass-through, weak liquidity, negative net). With no prior
+   * repayment history the best a new applicant reaches is "C / New direct";
+   * two or more flags drop them to "E / Watch-list".
+   */
+  function tier(A) {
+    const flags = [A.topFunder.pct > P.concentrationMaxPct, A.ptDays >= P.passThroughDays, A.lr < P.lrFloor, A.net < 0].filter(Boolean).length;
+    const L = CONFIG.ladder;
+    if (flags >= 2) return { ...L[4], reason: `${flags} structural risk flags — watch-list pending review.` };
+    if (flags === 1) return { ...L[2], reason: "New applicant with one caution flag — capped at New direct." };
+    return { ...L[2], reason: "Clean new applicant — caps at New direct without prior history." };
+  }
+
+  /**
+   * Risk-based price for a tier. Investor return is fixed; the Everpesa service
+   * fee rises with risk. Tier E has no fee entry -> not priced (manual review).
+   * @returns {null | {inv,comm,fee,allIn,apr}}
+   */
+  function pricing(c) {
+    const fees = PR.serviceFee;
+    if (!(c in fees)) return null;
+    const inv = PR.investorNet, comm = PR.commission, fee = fees[c];
+    return { inv, comm, fee, allIn: +(inv + fee).toFixed(1), apr: Math.round((inv + fee) * 365 / PR.cycleDays) };
+  }
+
+  /**
+   * Full decision: tier, price, a six-rule scorecard, the recommended ticket and
+   * its affordability, and an APPROVE / REFER / DECLINE verdict.
+   *
+   * Verdict logic: >=3 risk flags or negative net -> DECLINE; exactly 2 -> REFER
+   * (credit-officer review); otherwise APPROVE in principle (still gated on the
+   * non-cashflow verification layers).
+   */
+  function evaluate(A) {
+    const ev = tier(A);
+    const pr = pricing(ev.c);
+
+    // Average over the observed span.
+    const months = Math.max(1, A.spanDays / P.daysPerMonth);
+    const cycles = Math.max(1, A.spanDays / PR.cycleDays);
+    const avgMoIn = A.inflow / months;
+    const avgMoNet = A.net / months;
+    const avgCycleNet = A.net / cycles;
+
+    // Recommended ticket: a share of throughput, discounted when behaviour looks
+    // like pass-through, then capped against retained net and rounded.
+    const disc = A.ptDays >= P.passThroughDays ? T.passThroughDiscount.heavy : A.ptDays > 0 ? T.passThroughDiscount.some : T.passThroughDiscount.none;
+    const throughputCeil = Math.max(0, Math.round(avgMoIn * T.inflowShare * disc / T.rounding) * T.rounding);
+    let ticket = avgMoNet <= 0 ? 0 : Math.min(throughputCeil, Math.round(avgMoNet * T.netMultiple / T.rounding) * T.rounding);
+
+    // Cost of that ticket per cycle, and how much of retained net it consumes.
+    const cycleCost = pr ? ticket * pr.allIn / 100 : 0;
+    const coverage = avgCycleNet > 0 ? cycleCost / avgCycleNet : Infinity;
+
+    // Six-rule cashflow scorecard (display strings are the published policy).
+    const flags = [
+      { r: "Positive net cashflow", thr: "Net ≥ 0", val: Util.fmt(A.net), pass: A.net >= 0 },
+      { r: "Liquidity ratio", thr: "LR ≥ 1.0", val: A.lr.toFixed(2), pass: A.lr >= P.lrPass },
+      { r: "Funder diversification", thr: "Top funder ≤ 40%", val: Math.round(A.topFunder.pct) + "%", pass: A.topFunder.pct <= P.concentrationMaxPct },
+      { r: "Pass-through discipline", thr: "< 3 same-day cycles", val: A.ptDays + " day" + (A.ptDays === 1 ? "" : "s"), pass: A.ptDays < P.passThroughDays },
+      { r: "Throughput sufficiency", thr: "≥ UGX 200k / month", val: Util.fmtK(avgMoIn) + "/mo", pass: avgMoIn >= P.throughputMinMonthly },
+      { r: "Account activity", thr: "≥ 1 txn / week", val: A.perWeek.toFixed(1) + "/wk", pass: A.perWeek >= P.minTxnsPerWeek },
+    ];
+    const fails = flags.filter(f => !f.pass).length;
+
+    // Structural risk flags (the subset that also drives the tier).
+    const riskFlags = [A.topFunder.pct > P.concentrationMaxPct, A.ptDays >= P.passThroughDays, A.lr < P.lrFloor, A.net < 0].filter(Boolean).length;
+
+    let verdict, vc, vb, vn;
+    if (riskFlags >= 3 || A.net < 0) { verdict = "DECLINE"; vc = "#DC2626"; vb = "#FDECEC"; vn = "Cashflow does not support new debt — structural risk too high to price."; }
+    else if (riskFlags === 2) { verdict = "REFER"; vc = "#D97706"; vb = "#FEF4E2"; vn = "Borderline — route to credit officer (Dembe Bruno) for manual review before any offer."; }
+    else { verdict = "APPROVE"; vc = "#1F9D55"; vb = "#E8F6EE"; vn = "Approve in principle. Disbursement gated on the conditions below."; }
+
+    return { ev, pr, avgMoIn, avgMoNet, avgCycleNet, throughputCeil, ticket, cycleCost, coverage, disc, flags, fails, riskFlags, verdict, vc, vb, vn };
+  }
+
+  return { tier, pricing, evaluate };
+})();
+
+/* =============================================================================
+ * VIEW — pure render functions
+ * -----------------------------------------------------------------------------
+ * View functions either return an HTML string (the tab bodies) or write into a
+ * known mount point (the chrome). They read Model state but never mutate it;
+ * all state changes flow through the Controller. Inline on* handlers in the
+ * generated markup call the global action bridge defined near the bootstrap,
+ * which delegates straight into the Controller.
+ * ========================================================================== */
+const View = (() => {
+
+  /** Severity -> [text, background] palettes shared by the alert renderers. */
+  const SEV = { HIGH: ["#DC2626", "#FDECEC"], MEDIUM: ["#D97706", "#FEF4E2"], LOW: ["#64748B", "#F1F4FA"] };
+
+  /**
+   * Derive the AML/CFT alert list from a cashflow profile. Always returns at
+   * least one entry (a reassuring LOW note when nothing structural shows).
+   */
+  function alerts(A) {
+    const conc = A.topFunder.pct, out = [];
+    if (conc > CONFIG.policy.concentrationAlertPct)
+      out.push({ s: "HIGH", t: `Single-source inflow concentration (${Math.round(conc)}%)`, b: `${A.topFunder.cp} supplies ${Util.fmt(A.topFunder.v)} of inflows. Source of funds unverified — confirm business revenue vs third-party float.` });
+    if (A.ptDays >= CONFIG.policy.passThroughDays)
+      out.push({ s: "HIGH", t: `Rapid same-day pass-through on ${A.ptDays} days`, b: `Large inflow followed by ≥60% outflow same day (≈${Util.fmt(A.ptVol)} cycled). Consistent with float/agent activity or layering.` });
+    if (A.repeated.length)
+      out.push({ s: "MEDIUM", t: "Repeated identical amounts", b: `Recurring fixed values: ${A.repeated.slice(0, 3).map(([a, c]) => `${Util.fmt(+a)}×${c}`).join(", ")}.` });
+    if (A.holders.length > 1)
+      out.push({ s: "MEDIUM", t: "Mixed account holders in view", b: "Multiple borrowers combined — select one borrower for a clean per-applicant decision." });
+    if (!out.length)
+      out.push({ s: "LOW", t: "No structural red flags in this window", b: "Flows look diversified and retained. Complete identity, stock and witness layers before settlement." });
+    return out;
+  }
+
+  /**
+   * Analysis tab: tier headline, KPI tiles, monthly chart, funder concentration,
+   * the five-layer verification status, and AML alerts. Returns an HTML string.
+   */
+  function analysis(A, tier, ev, alerts) {
+    // Five-layer verification model. Only the cashflow (2) and behavioural (5)
+    // layers are derivable from a statement; the rest are captured at onboarding.
+    const layers = [
+      { n: 1, name: "Identity", st: "PENDING", note: "National ID + selfie liveness not present in a statement — capture at onboarding." },
+      { n: 2, name: "Cashflow", st: A.count > CONFIG.policy.thinTxnThreshold ? "ANALYZED" : "THIN", note: `${A.count} transactions, ${A.winStart} → ${A.winEnd}. Liquidity ratio ${A.lr.toFixed(2)}.` },
+      { n: 3, name: "Stock evidence", st: "PENDING", note: "Geo-tagged stock photos required — not derivable from mobile money data." },
+      { n: 4, name: "Local witness", st: "PENDING", note: "KCCA / trading licence or SACCO vouch required." },
+      { n: 5, name: "Behavioural", st: A.count > CONFIG.policy.thinTxnThreshold ? "PARTIAL" : "THIN", note: `Velocity ${A.perWeek.toFixed(1)} txns/week. No prior Everpesa repayment history.` },
+    ];
+    const lc = { ANALYZED: ["#1F9D55", "#E8F6EE"], PARTIAL: ["#D97706", "#FEF4E2"], PENDING: ["#64748B", "#F1F4FA"], THIN: ["#D97706", "#FEF4E2"] };
+
+    // Chart scale = tallest bar across all months.
+    let mx = 1; for (const m of A.monthly) { if (m.inflow > mx) mx = m.inflow; if (m.outflow > mx) mx = m.outflow; }
+    const bars = A.monthly.map(m => `<div class="mcol"><div class="mstack"><div class="b" style="height:${m.inflow / mx * 100}%;background:var(--in)" title="In ${Util.fmt(m.inflow)}"></div><div class="b" style="height:${m.outflow / mx * 100}%;background:var(--out)" title="Out ${Util.fmt(m.outflow)}"></div></div><div class="mlab">${m.month}</div></div>`).join("");
+    const conrows = A.topIn.map(r => `<div class="concrow"><div class="cname">${r.cp}</div><div class="ctrack"><div class="cfill" style="width:${Math.max(r.pct, 7)}%;background:${r.cp === A.topFunder.cp && r.pct > 25 ? '#DC2626' : 'var(--brand)'}"><span>${Math.round(r.pct)}%</span></div></div><div class="cval">${Util.fmtK(r.v)}</div></div>`).join("");
+    const ladderHtml = CONFIG.ladder.map(s => `<div class="lstep ${s.c === ev.c ? 'act' : ''}"><b>${s.c}</b> ${s.p} · ${s.r}</div>`).join("");
+
+    return `
+  <div class="banner">⚠ <div><b>Verify account holder identity.</b> Confirm each detected MSISDN belongs to the applicant and is not an internal / related-party account before treating any score as fundable.</div></div>
+  <div class="headline">
+    <div class="evbadge"><div class="lt">${ev.c}</div><div class="rs">reserve ${ev.r}</div><div class="pf">Everpesa tier</div></div>
+    <div class="hl-txt"><div class="hl-k">Assigned credit tier</div><h2>${ev.p}</h2><p>${ev.reason} Borrower all-in cost ≈ 10–11% per 14-day cycle. ${ev.c === "E" ? "Hold pricing pending review." : "See the Decisioning tab for the exact rate and lend logic."}</p><div class="ladder">${ladderHtml}</div></div>
+  </div>
+  <div class="secondary card" style="margin-bottom:16px;padding:12px 16px"><span>Liquidity cross-check:</span><span class="stier" style="color:${tier.c};background:${tier.b}">${tier.n}</span><span>LR ${A.lr.toFixed(2)} · net ${Util.fmt(A.net)} · ${A.ptDays >= 3 ? 'pass-through inflates the ratio' : 'reflects retained cashflow'}.</span></div>
+  <div class="grid4">
+    <div class="card kpi"><div class="lab">Total inflows</div><div class="val" style="color:var(--in)">${Util.fmt(A.inflow)}</div><div class="sub">${A.inCount} credits</div></div>
+    <div class="card kpi"><div class="lab">Total outflows</div><div class="val" style="color:var(--navy)">${Util.fmt(A.outflow)}</div><div class="sub">${A.outCount} debits · ${Util.fmt(A.fees)} fees</div></div>
+    <div class="card kpi"><div class="lab">Net flow</div><div class="val" style="color:${A.net >= 0 ? 'var(--in)' : '#DC2626'}">${Util.fmt(A.net)}</div><div class="sub">${A.net >= 0 ? 'surplus' : 'deficit'}</div></div>
+    <div class="card kpi"><div class="lab">Liquidity ratio</div><div class="val" style="color:${tier.c}">${A.lr.toFixed(2)}</div><div class="sub">inflow ÷ outflow</div></div>
+  </div>
+  <div class="card" style="margin-bottom:16px"><div class="ttl">▦ Inflow vs outflow by month</div><div class="cap">All values UGX. Net is retained after outflows.</div><div class="bars">${bars}</div><div class="legend"><span><i class="sw" style="background:var(--in)"></i>Inflow</span><span><i class="sw" style="background:var(--out)"></i>Outflow</span></div></div>
+  <div class="card" style="margin-bottom:16px"><div class="ttl">◑ Inflow concentration (top funders)</div><div class="cap">A healthy MSME shows diversified customer receipts.</div>${conrows || '<div class="cap">No inflows in window.</div>'}</div>
+  <div class="grid2">
+    <div class="card"><div class="ttl">✔ Five-layer verification</div>${layers.map(l => `<div class="layer"><div class="lnum">${l.n}</div><div><div class="lhead"><b>${l.name}</b><span class="pill" style="color:${lc[l.st][0]};background:${lc[l.st][1]}">${l.st}</span></div><div class="lnote">${l.note}</div></div></div>`).join("")}</div>
+    <div class="card"><div class="ttl">⚠ AML / CFT alerts</div>${alerts.map(a => `<div class="alert" style="border-color:${SEV[a.s][1]};background:${SEV[a.s][1]}55"><div><div class="ah"><span class="sev" style="background:${SEV[a.s][0]}">${a.s}</span><b>${a.t}</b></div><p>${a.b}</p></div></div>`).join("")}</div>
+  </div>
+  <div class="act" style="margin-top:16px"><button class="btn pri" onclick="printReport()">⎙ Download PDF report</button><button class="btn" onclick="exportJSON()">⤓ Export JSON</button><button class="btn" onclick="exportCSV()">⤓ Export CSV</button></div>
+  <div class="foot">${A.count} transactions · ${A.perWeek.toFixed(1)} txns/week · ${A.wallets.join(" + ")} · ${A.holders.join(", ")} · computed live · not a fundable decision until all 5 layers clear</div>`;
+  }
+
+  /**
+   * Decisioning tab: the decision pipeline, the scorecard, the verdict + gates,
+   * the borrower rate buildup, and affordability/recommended ticket. Returns an
+   * HTML string. Recomputes Decision.evaluate(A) for a self-contained render.
+   */
+  function decision(A) {
+    const D = Decision.evaluate(A), ev = D.ev, pr = D.pr;
+
+    const pipe = [
+      { k: "Cashflow", v: Util.fmt(A.net), d: "90-day net" },
+      { k: "Scorecard", v: `${6 - D.fails}/6`, d: "rules passed" },
+      { k: "Tier", v: ev.c, d: ev.p },
+      { k: "Decision", v: D.verdict, d: "lend rule" },
+      { k: "Borrower rate", v: pr ? pr.allIn + "%" : "—", d: pr ? "/ 14-day cycle" : "not priced" },
+    ].map((n, i) => `<div class="pnode"><div class="pk">${i + 1}. ${n.k}</div><div class="pv" style="${n.k === 'Decision' ? 'color:' + D.vc : ''}${n.k === 'Tier' ? 'color:var(--brand)' : ''}">${n.v}</div><div class="pd">${n.d}</div></div>`).join("");
+
+    const scrows = D.flags.map(f => `<tr><td class="rl">${f.r}<div class="th">${f.thr}</div></td><td class="vl">${f.val}</td><td style="text-align:right"><span class="res ${f.pass ? 'p' : 'f'}">${f.pass ? 'PASS' : 'FAIL'}</span></td></tr>`).join("");
+
+    // Non-cashflow disbursement conditions. Only "source of funds" is auto-cleared
+    // (when concentration is acceptable); the rest are captured off-platform.
+    const gates = [
+      { n: "Identity verified (ID + selfie liveness)", ok: false },
+      { n: "Stock evidence (geo-tagged photos)", ok: false },
+      { n: "Local witness (KCCA / SACCO vouch)", ok: false },
+      { n: "Source of funds confirmed for " + A.topFunder.cp, ok: A.topFunder.pct <= CONFIG.policy.concentrationMaxPct },
+    ];
+
+    // Rate buildup — only when the tier is priceable.
+    let rateBlock;
+    if (pr) {
+      const segs = [{ l: `Investor net 7.6%`, w: pr.inv, c: "var(--brand)" }, { l: `Service fee ${pr.fee}%`, w: pr.fee, c: "var(--brand2)" }];
+      const tot = pr.inv + pr.fee;
+      rateBlock = `<div class="rate-bar">${segs.map(s => `<div class="rate-seg" style="width:${s.w / tot * 100}%;background:${s.c}">${s.w}%</div>`).join("")}</div>
+    <table class="rtab">
+      <tr><td class="rl">Interest to investor (net)</td><td class="rv">7.6%</td></tr>
+      <tr><td class="rl">Everpesa service fee · Tier ${ev.c}</td><td class="rv">${pr.fee}%</td></tr>
+      <tr><td class="rl">Investment commission (investor-side)</td><td class="rv">${pr.comm}%</td></tr>
+      <tr><td class="rl">Late-payment penalty</td><td class="rv">capped per terms</td></tr>
+      <tr class="tot"><td>Borrower all-in · per 14-day cycle</td><td style="text-align:right">${pr.allIn}%</td></tr>
+    </table>
+    <div class="cap" style="margin-top:8px">Equivalent disclosed APR ≈ <b>${pr.apr}%</b> (${Math.round(365 / CONFIG.pricing.cycleDays)} cycles/yr), shown to the borrower at origination.</div>`;
+    } else {
+      rateBlock = `<div class="averd" style="background:var(--hibg);color:#9b2222">No rate offered. Borrower is on the <b>${ev.c} — watch-list</b>; route to manual review before any pricing.</div>`;
+    }
+
+    // Affordability verdict: no headroom / tight / serviceable.
+    const affVerdict = D.ticket <= 0
+      ? { c: "#DC2626", b: "#FDECEC", t: "No working-capital headroom on cashflow alone. Retained net is ≤ 0 — lending would not be serviceable from observed flows." }
+      : D.coverage > CONFIG.policy.coverageTarget
+        ? { c: "#D97706", b: "#FEF4E2", t: `Tight: a ${Util.fmt(D.ticket)} ticket costs ${Util.fmt(D.cycleCost)}/cycle vs ${Util.fmt(D.avgCycleNet)} retained/cycle (cover ${(D.coverage * 100).toFixed(0)}%). Reduce ticket or refer.` }
+        : { c: "#1F9D55", b: "#E8F6EE", t: `Serviceable: ${Util.fmt(D.ticket)} ticket costs ${Util.fmt(D.cycleCost)}/cycle, well within ${Util.fmt(D.avgCycleNet)} retained/cycle.` };
+
+    return `
+  <div class="card" style="margin-bottom:16px"><div class="ttl">⚙ How the decision is reached</div><div class="cap">Every borrower runs the same pipeline. The result at each stage is shown below.</div><div class="pipe">${pipe}</div></div>
+
+  <div class="grid2">
+    <div class="card"><div class="ttl">▣ Lending scorecard</div><div class="cap">Six cashflow rules graded from the statement.</div><table class="sctable"><tbody>${scrows}</tbody></table>
+      <div class="cap" style="margin-top:10px">${6 - D.fails}/6 passed · ${D.riskFlags} structural risk flag${D.riskFlags === 1 ? '' : 's'} → Everpesa tier <b style="color:var(--brand)">${ev.c}</b>.</div></div>
+    <div class="card"><div class="ttl">⚖ Lending decision</div>
+      <div class="verdict"><span class="vbadge" style="color:${D.vc};background:${D.vb}">${D.verdict}</span><div class="vnote">${D.vn}</div>
+        <div class="gates"><div class="cap" style="margin-bottom:6px">Disbursement gated on:</div>${gates.map(g => `<div class="g"><span class="gi" style="${g.ok ? 'background:var(--okbg);color:var(--ok)' : ''}">${g.ok ? '✓' : '!'}</span>${g.n}</div>`).join("")}</div>
+      </div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px"><div class="ttl">% Borrower rate buildup</div><div class="cap">Risk-based pricing — the service fee rises with the assigned tier; investor return is fixed.</div>${rateBlock}</div>
+
+  <div class="card" style="margin-bottom:16px"><div class="ttl">▤ Affordability &amp; recommended ticket</div><div class="cap">Ticket sized to mobile-money throughput, discounted for pass-through, then checked against retained cashflow.</div>
+    <div class="agrid">
+      <div class="amini"><div class="l">Avg monthly inflow</div><div class="v">${Util.fmtK(D.avgMoIn)}</div></div>
+      <div class="amini"><div class="l">Retained net / month</div><div class="v" style="${D.avgMoNet < 0 ? 'color:#DC2626' : ''}">${Util.fmtK(D.avgMoNet)}</div></div>
+      <div class="amini"><div class="l">Recommended max ticket</div><div class="v" style="color:var(--brand)">${D.ticket > 0 ? Util.fmtK(D.ticket) : '—'}</div></div>
+      <div class="amini"><div class="l">Est. cost / 14-day cycle</div><div class="v">${pr && D.ticket > 0 ? Util.fmtK(D.cycleCost) : '—'}</div></div>
+    </div>
+    <div class="averd" style="background:${affVerdict.b};color:${affVerdict.c}">${affVerdict.t}</div>
+    <div class="cap" style="margin-top:10px">Method: ticket = 30% of avg monthly inflow × pass-through discount (${D.disc.toFixed(2)}), capped at 1.5× retained monthly net. Cost = ticket × ${pr ? pr.allIn : '—'}%. Coverage = cost ÷ retained per cycle (target ≤ 50%).</div>
+  </div>
+
+  <div class="act"><button class="btn pri" onclick="printReport()">⎙ Download PDF report</button><button class="btn" onclick="exportJSON()">⤓ Export JSON</button></div>
+  <div class="foot">Thresholds are configurable underwriting policy: concentration 40% · pass-through 3 days · LR floor 0.8 · DTI cover 50%.</div>`;
+  }
+
+  /* ---- Chrome: small stateful widgets that write directly to their mounts ---- */
+  const chrome = {
+    /** Parsed-file chips (with a "Clear all" affordance). */
+    files() {
+      const F = document.getElementById("files");
+      if (!Store.state.files.length) { F.innerHTML = ""; return; }
+      F.innerHTML = Store.state.files.map((f, i) => `<div class="chip"><span class="dot ${f.ok ? '' : 'err'}"></span><b>${f.name}</b> · ${f.ok ? `${f.wallet} · ${f.holder} · ${f.count} txns` : 'unreadable'} <button class="x" onclick="rm(${i})">×</button></div>`).join("") + `<div class="chip clr" onclick="clearAll()">Clear all</div>`;
+    },
+
+    /** Borrower selector — only shown when more than one borrower is present. */
+    borrowers() {
+      const B = document.getElementById("bbar");
+      const bs = Store.getBorrowers();
+      if (bs.length < 2) { B.innerHTML = ""; return; }
+      const cards = [{ phone: "ALL", holder: "All borrowers", wallets: [], tx: Store.getTx() }, ...bs];
+      B.innerHTML = cards.map(b => `<div class="bcard ${Store.state.borrower === b.phone ? 'on' : ''}" onclick="selB('${b.phone}')"><div class="bn">${b.holder}</div><div class="bp">${b.phone === "ALL" ? bs.length + " borrowers · " + b.tx.length + " txns" : (b.raw || b.phone) + " · " + b.wallets.join("/") + " · " + b.tx.length + " txns"}</div></div>`).join("");
+    },
+
+    /** Wallet sub-filter — only shown when the current view spans >1 wallet. */
+    walletSeg() {
+      let pool = Store.getTx();
+      if (Store.state.borrower !== "ALL") pool = pool.filter(t => t.phone === Store.state.borrower);
+      const ws = [...new Set(pool.map(t => t.wallet))];
+      const seg = document.getElementById("walletseg");
+      if (ws.length < 2) {
+        seg.innerHTML = "";
+        if (Store.state.wallet !== "ALL" && !ws.includes(Store.state.wallet)) Store.state.wallet = "ALL";
+        return;
+      }
+      seg.innerHTML = ["ALL", ...ws].map(w => `<button data-wallet="${w}" class="${Store.state.wallet === w ? 'on' : ''}">${w}</button>`).join("");
+      seg.querySelectorAll("button").forEach(b => b.onclick = () => { Store.state.wallet = b.dataset.wallet; Controller.render(); });
+    },
+  };
+
+  /* ---- Exports: the deliverable artifacts (print memo, JSON, CSV) ---- */
+  const exports = {
+    /**
+     * Build the print-only credit memo into #printreport and invoke print.
+     * @param {{A,ev,tier,alerts}} ctx  the current render context
+     */
+    printReport(ctx) {
+      if (!ctx) return;
+      const A = ctx.A, ev = ctx.ev, tier = ctx.tier, al = ctx.alerts;
+      if (!A) return;
+      const D = Decision.evaluate(A), pr = D.pr, today = new Date().toISOString().slice(0, 10);
+      const thin = CONFIG.policy.thinTxnThreshold;
+      document.getElementById("printreport").innerHTML = `<div class="rp">
+    <div class="rphead"><div><h1>Everpesa Credit Risk Report</h1><div style="font-size:12px;color:#5A6685">Borrower cashflow · decision · pricing memo</div></div>
+    <div class="rpmeta">Generated ${today}<br>Window ${A.winStart} → ${A.winEnd}<br>Money Lending Licence No. 1191/ML</div></div>
+    <h3>BORROWER</h3><table><tr><td class="lbl">Account holder(s)</td><td class="vv">${A.holders.join(", ")}</td></tr><tr><td class="lbl">Wallet(s)</td><td class="vv">${A.wallets.join(" + ")}</td></tr><tr><td class="lbl">Transactions analysed</td><td class="vv">${A.count} (${A.perWeek.toFixed(1)}/wk)</td></tr></table>
+    <h3>CASHFLOW (90-DAY)</h3><table><tr><td class="lbl">Total inflows</td><td class="vv">${Util.fmt(A.inflow)}</td></tr><tr><td class="lbl">Total outflows</td><td class="vv">${Util.fmt(A.outflow)}</td></tr><tr><td class="lbl">Net flow</td><td class="vv">${Util.fmt(A.net)}</td></tr><tr><td class="lbl">Liquidity ratio</td><td class="vv">${A.lr.toFixed(2)} (${tier.n})</td></tr><tr><td class="lbl">Top funder</td><td class="vv">${A.topFunder.cp} · ${Math.round(A.topFunder.pct)}%</td></tr></table>
+    <h3>DECISION</h3><div style="margin:6px 0"><span class="rtier">${ev.c}</span><span style="font-size:13px">${ev.p} — <b>${D.verdict}</b></span></div><div style="font-size:12px;color:#5A6685;margin-top:4px">${D.vn}</div>
+    <h3>PRICING</h3>${pr ? `<table><tr><td class="lbl">Interest to investor (net)</td><td class="vv">7.6%</td></tr><tr><td class="lbl">Everpesa service fee (Tier ${ev.c})</td><td class="vv">${pr.fee}%</td></tr><tr><td class="lbl">Borrower all-in / 14-day cycle</td><td class="vv">${pr.allIn}%</td></tr><tr><td class="lbl">Equivalent disclosed APR</td><td class="vv">${pr.apr}%</td></tr><tr><td class="lbl">Recommended max ticket</td><td class="vv">${D.ticket > 0 ? Util.fmt(D.ticket) : '— (no headroom)'}</td></tr></table>` : '<div style="font-size:12px;color:#9b2222">No rate offered — borrower on watch-list, manual review required.</div>'}
+    <h3>AML / CFT FLAGS</h3>${al.map(a => `<div class="amlrow"><b>[${a.s}]</b> ${a.t} — ${a.b}</div>`).join("")}
+    <h3>FIVE-LAYER STATUS</h3><table><tr><td class="lbl">1 · Identity</td><td class="vv">Pending</td></tr><tr><td class="lbl">2 · Cashflow</td><td class="vv">${A.count > thin ? 'Analyzed' : 'Thin'}</td></tr><tr><td class="lbl">3 · Stock evidence</td><td class="vv">Pending</td></tr><tr><td class="lbl">4 · Local witness</td><td class="vv">Pending</td></tr><tr><td class="lbl">5 · Behavioural</td><td class="vv">${A.count > thin ? 'Partial' : 'Thin'}</td></tr></table>
+    <h3>CLARIFICATIONS REQUIRED</h3><ul><li>Relationship &amp; source of funds for ${A.topFunder.cp}.</li><li>Declared business type and turnover.</li>${A.ptDays >= 3 ? `<li>Same-day pass-through on ${A.ptDays} days.</li>` : ""}<li>National ID + selfie liveness, geo-tagged stock photos, KCCA/SACCO vouch.</li></ul>
+    <div class="sig"><div class="sigline">Credit officer</div><div class="sigline">Risk &amp; compliance</div></div>
+    <div class="disc">Generated by Everpesa Mobile Money Risk Analyzer from borrower-supplied statements. Model output for internal underwriting only; not a final credit decision until all five verification layers clear. Contains third-party personal data — handle per the Data Protection Act.</div>
+  </div>`;
+      window.print();
+    },
+
+    /** Export the decision as machine-readable JSON. */
+    json(ctx) {
+      if (!ctx) return;
+      const A = ctx.A;
+      if (!A) return;
+      const D = Decision.evaluate(A);
+      const payload = {
+        window: { type: Store.state.win === "90" ? "rolling_90d" : "all", start: A.winStart, end: A.winEnd },
+        borrowers: A.holders, wallets: A.wallets,
+        flows: { inflow: A.inflow, outflow: A.outflow, netFlow: A.net, fees: A.fees, liquidityRatio: +A.lr.toFixed(3) },
+        concentration: { topFunder: A.topFunder.cp, pct: +A.topFunder.pct.toFixed(1) },
+        decision: { tier: D.ev.c, profile: D.ev.p, verdict: D.verdict, scorecardPassed: `${6 - D.fails}/6`, riskFlags: D.riskFlags },
+        pricing: D.pr ? { investorNet: 7.6, serviceFee: D.pr.fee, borrowerAllIn: D.pr.allIn, apr: D.pr.apr, recommendedTicket: D.ticket } : null,
+        amlFlags: ctx.alerts.map(a => ({ severity: a.s, flag: a.t })),
+        monthly: A.monthly,
+      };
+      Util.download(JSON.stringify(payload, null, 2), "everpesa_decision.json", "application/json");
+    },
+
+    /** Export the windowed transaction ledger as CSV. */
+    csv(ctx) {
+      if (!ctx) return;
+      const A = ctx.A;
+      if (!A) return;
+      const rows = [
+        ["date", "holder", "wallet", "direction", "amount_ugx", "fee_ugx", "counterparty", "type"],
+        ...A.tx.map(t => [t.date, t.holder, t.wallet, t.dir === "i" ? "inflow" : "outflow", t.amount, t.fee, t.cp, t.type]),
+      ];
+      Util.download(rows.map(r => r.join(",")).join("\n"), "everpesa_transactions.csv", "text/csv");
+    },
+  };
+
+  return { alerts, analysis, decision, chrome, exports };
+})();
+
+/* =============================================================================
+ * CONTROLLER — orchestration & the update loop
+ * -----------------------------------------------------------------------------
+ * Owns: the ingest pipeline, every user-event handler, and render(). render() is
+ * the single place that pulls Model state through the View; every handler ends
+ * by calling it. `current` is the last rendered context, handed to the exporters.
+ * ========================================================================== */
+const Controller = (() => {
+  let current = null;   // { A, tier, ev, alerts } from the latest non-empty render
+
+  /**
+   * Read each dropped/selected PDF, parse it, and append it to the Store.
+   * De-dupes on (name,size); records an "unreadable" stub on failure so the user
+   * still sees the file. Bumps the Store version once, then re-renders.
+   */
+  async function ingest(list) {
+    const L = document.getElementById("loading");
+    for (const file of list) {
+      if (Store.state.files.some(f => f.name === file.name && f.size === file.size)) continue;
+      L.style.display = "flex";
+      document.getElementById("loadtxt").textContent = "Reading " + file.name + "…";
+      try {
+        const text = await Pdf.extract(file);
+        const { wallet, tx, meta } = Parser.parseAny(text);
+        const phone = Parser.normPhone(meta.phone) || ("file:" + file.name);
+        const name = meta.name || (meta.phone ? ("•••" + Parser.normPhone(meta.phone).slice(-4)) : file.name.replace(/\.pdf$/i, ""));
+        // Stamp borrower identity + a precomputed timestamp onto each row, so the
+        // analysis hot path never re-parses date strings.
+        for (const t of tx) { t.phone = phone; t.holder = name; t.rawPhone = meta.phone || ""; t.ts = Date.parse(t.date); }
+        Store.state.files.push({ name: file.name, size: file.size, wallet, phone, holder: name, count: tx.length, ok: tx.length > 0, tx });
+      } catch (e) {
+        Store.state.files.push({ name: file.name, size: file.size, wallet: "?", count: 0, ok: false, err: String(e.message || e), tx: [] });
+      }
+    }
+    Store.bump();
+    L.style.display = "none";
+    render();
+  }
+
+  /** Pull current Model state through the View. Called after every change. */
+  function render() {
+    View.chrome.files();
+    View.chrome.borrowers();
+    View.chrome.walletSeg();
+
+    const host = document.getElementById("tabhost"), R = document.getElementById("results");
+    const A = Analysis.run();
+
+    // Empty states — leave `current` untouched so a stale export is impossible
+    // to trigger from a now-empty view (the exporters guard on ctx anyway).
+    if (!A) { host.innerHTML = ""; R.innerHTML = `<div class="empty"><div class="ic">⬚</div><p style="margin-top:10px">No statements yet. Upload a PDF above to begin.</p></div>`; return; }
+    if (A.empty) { host.innerHTML = ""; R.innerHTML = `<div class="empty"><p>No transactions in this window/wallet. Try “All data” or switch wallet/borrower.</p></div>`; return; }
+
+    // Liquidity cross-check band for the Analysis headline.
+    const P = CONFIG.policy;
+    const tier = A.lr >= P.lrStrong ? { n: "Low", c: "#1F9D55", b: "#E8F6EE" }
+      : A.lr >= P.lrFloor ? { n: "Medium", c: "#D97706", b: "#FEF4E2" }
+        : { n: "High", c: "#DC2626", b: "#FDECEC" };
+    const ev = Decision.tier(A);
+    const alerts = View.alerts(A);
+    current = { A, tier, ev, alerts };
+
+    host.innerHTML = `<div class="tabs">
+    <button class="${Store.state.tab === 'analysis' ? 'on' : ''}" onclick="selTab('analysis')">▦ Analysis</button>
+    <button class="${Store.state.tab === 'decision' ? 'on' : ''}" onclick="selTab('decision')">⚖ Decisioning</button>
+  </div>`;
+    R.innerHTML = Store.state.tab === 'decision' ? View.decision(A) : View.analysis(A, tier, ev, alerts);
+  }
+
+  /* ---- User-event handlers (each mutates Model state, then re-renders) ---- */
+
+  /** Select a borrower (resets the wallet sub-filter to ALL). */
+  function selectBorrower(p) { Store.state.borrower = p; Store.state.wallet = "ALL"; render(); }
+
+  /** Switch the active tab. */
+  function selectTab(t) { Store.state.tab = t; render(); }
+
+  /** Remove the i-th file; collapse to empty / reset borrower if it vanished. */
+  function removeFile(i) {
+    Store.state.files.splice(i, 1);
+    Store.bump();
+    if (!Store.state.files.length) { clearAll(); return; }
+    if (Store.state.borrower !== "ALL" && !Store.getTx().some(t => t.phone === Store.state.borrower)) Store.state.borrower = "ALL";
+    render();
+  }
+
+  /** Clear everything back to the initial empty state. */
+  function clearAll() { Store.state.files = []; Store.state.wallet = "ALL"; Store.state.borrower = "ALL"; Store.bump(); render(); }
+
+  /** Wire DOM events on boot, then paint the initial (empty) state. */
+  function init() {
+    const drop = document.getElementById("drop"), file = document.getElementById("file");
+    drop.onclick = () => file.click();
+    file.onchange = e => { ingest([...e.target.files]); file.value = ""; };
+    ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("drag"); }));
+    ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("drag"); }));
+    drop.addEventListener("drop", e => { ingest([...e.dataTransfer.files].filter(f => /pdf$/i.test(f.name) || f.type === "application/pdf")); });
+    document.querySelectorAll("#winseg button").forEach(b => b.onclick = () => {
+      document.querySelectorAll("#winseg button").forEach(x => x.classList.remove("on"));
+      b.classList.add("on");
+      Store.state.win = b.dataset.w;
+      render();
+    });
+    if (!PDFJS) document.getElementById("results").innerHTML = '<div class="banner">PDF engine failed to load — check your connection and reopen.</div>';
+    render();
+  }
+
+  return { ingest, render, selectBorrower, selectTab, removeFile, clearAll, init, get current() { return current; } };
+})();
+
+/* =============================================================================
+ * BOOTSTRAP
+ * -----------------------------------------------------------------------------
+ * View -> Controller action bridge: View markup uses inline on* handlers (e.g.
+ * onclick="selB('772...')"). These globals are the single, explicit surface the
+ * View is allowed to call; each just delegates into the Controller. Keeping the
+ * surface tiny and named makes the coupling obvious and greppable.
+ * ========================================================================== */
+window.selB = p => Controller.selectBorrower(p);
+window.selTab = t => Controller.selectTab(t);
+window.rm = i => Controller.removeFile(i);
+window.clearAll = () => Controller.clearAll();
+window.printReport = () => View.exports.printReport(Controller.current);
+window.exportJSON = () => View.exports.json(Controller.current);
+window.exportCSV = () => View.exports.csv(Controller.current);
+
+Controller.init();
+</script>
